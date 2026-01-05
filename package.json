@@ -1,5 +1,5 @@
 {
-  "name": "worktree-manager",
+  "name": "@jasonfutch/worktree-manager",
   "version": "1.0.0",
   "description": "Terminal app for managing git worktrees with AI assistance",
   "type": "module",
@@ -8,6 +8,11 @@
     "wtm": "dist/index.js",
     "worktree-manager": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
@@ -20,24 +25,37 @@
     "worktree",
     "terminal",
     "tui",
+    "cli",
     "claude",
     "ai",
-    "vibe-coding"
+    "vscode",
+    "cursor"
   ],
-  "author": "",
+  "author": "jasonfutch",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jasonfutch/worktree-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jasonfutch/worktree-manager/issues"
+  },
+  "homepage": "https://github.com/jasonfutch/worktree-manager#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "@types/blessed": "^0.1.27",
-    "@types/node": "^25.0.3",
     "blessed": "^0.1.81",
     "chalk": "^5.6.2",
-    "commander": "^14.0.2",
-    "typescript": "^5.9.3"
+    "commander": "^14.0.2"
   },
   "devDependencies": {
-    "tsx": "^4.21.0"
+    "@types/blessed": "^0.1.27",
+    "@types/node": "^25.0.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }

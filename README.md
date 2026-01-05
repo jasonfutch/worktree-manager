@@ -19,7 +19,7 @@ A terminal app for managing git worktrees with AI assistance.
 ## Installation
 
 ```bash
-npm install -g worktree-manager
+npm install -g @jasonfutch/worktree-manager
 ```
 
 ## Usage
@@ -116,7 +116,7 @@ wtm help
 ### Installation from Source
 
 ```bash
-git clone https://github.com/your-username/worktree-manager
+git clone https://github.com/jasonfutch/worktree-manager
 cd worktree-manager
 npm install
 npm run build
