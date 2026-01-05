@@ -1,4 +1,4 @@
-# Worktree Manager
+# Worktree Manager TUI/CLI
 
 A terminal app for managing git worktrees with AI assistance.
 
