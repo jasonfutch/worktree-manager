@@ -1,7 +1,7 @@
 {
   "name": "worktree-manager",
   "version": "1.0.0",
-  "description": "Terminal app for managing git worktrees with AI assistance - similar to vibe-tree",
+  "description": "Terminal app for managing git worktrees with AI assistance",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

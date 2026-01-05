@@ -1,9 +1,11 @@
 import blessed from 'blessed';
 import { GitWorktree } from '../git/worktree.js';
-import { openInVSCode, openInCursor, truncate } from '../utils/helpers.js';
-import type { Worktree, AppState } from '../types.js';
+import { truncate } from '../utils/helpers.js';
+import type { Worktree } from '../types.js';
 import { spawn } from 'child_process';
-import path from 'path';
+import { escapeAppleScript, escapeWindowsArg } from '../utils/shell.js';
+import { UI, PLATFORM, getInstallInstruction } from '../constants.js';
+import { GitCommandError } from '../errors.js';
 
 export class WorktreeManagerTUI {
   private screen: blessed.Widgets.Screen;
@@ -13,12 +15,13 @@ export class WorktreeManagerTUI {
   private statusBar: blessed.Widgets.BoxElement;
   private helpBox: blessed.Widgets.BoxElement;
   private inputBox: blessed.Widgets.TextboxElement | null = null;
-  
+
   private git: GitWorktree;
   private worktrees: Worktree[] = [];
   private selectedIndex = 0;
   private repoPath: string;
   private repoName: string;
+  private isModalOpen = false;
 
   constructor(repoPath: string) {
     this.repoPath = repoPath;
@@ -74,7 +77,7 @@ export class WorktreeManagerTUI {
       top: 0,
       left: '50%',
       width: '50%',
-      height: '60%',
+      height: '50%',
       border: { type: 'line' },
       style: {
         border: { fg: 'green' }
@@ -88,10 +91,10 @@ export class WorktreeManagerTUI {
     this.helpBox = blessed.box({
       parent: this.mainBox,
       label: ' ⌨️  Keybindings ',
-      top: '60%',
+      top: '50%',
       left: '50%',
       width: '50%',
-      height: '40%-3',
+      height: '50%-3',
       border: { type: 'line' },
       style: {
         border: { fg: 'yellow' }
@@ -104,11 +107,11 @@ export class WorktreeManagerTUI {
 
 {bold}Actions{/bold}
   {green-fg}n{/} New worktree    {red-fg}d{/} Delete worktree
-  {blue-fg}c{/} Open VS Code    {blue-fg}u{/} Open Cursor
-  {magenta-fg}t{/} Open Terminal   {magenta-fg}a{/} Launch Claude
+  {blue-fg}e{/} Open Editor     {magenta-fg}a{/} Launch AI
+  {magenta-fg}t{/} Open Terminal
 
 {bold}General{/bold}
-  {yellow-fg}q{/} Quit           {yellow-fg}?{/} Toggle help`
+  {yellow-fg}q{/} Quit           {yellow-fg}?{/} Help`
     });
 
     // Status bar
@@ -149,26 +152,27 @@ export class WorktreeManagerTUI {
     // Delete worktree
     this.screen.key(['d'], () => this.promptDeleteWorktree());
 
-    // Open in VS Code
-    this.screen.key(['c'], () => this.openSelectedInEditor('code'));
-
-    // Open in Cursor
-    this.screen.key(['u'], () => this.openSelectedInEditor('cursor'));
+    // Open in Editor
+    this.screen.key(['e'], () => this.openInEditor());
 
     // Open terminal
     this.screen.key(['t'], () => this.openTerminal());
 
-    // Launch Claude
-    this.screen.key(['a'], () => this.launchClaude());
+    // Launch AI
+    this.screen.key(['a'], () => this.launchAI());
 
     // Enter - show details
     this.screen.key(['enter'], () => this.showDetails());
+
+    // Show help modal
+    this.screen.key(['?'], () => this.showHelp());
 
     // Focus list by default
     this.worktreeList.focus();
   }
 
   private moveSelection(delta: number): void {
+    if (this.isModalOpen) return;
     const newIndex = Math.max(0, Math.min(this.worktrees.length - 1, this.selectedIndex + delta));
     if (newIndex !== this.selectedIndex) {
       this.selectedIndex = newIndex;
@@ -202,25 +206,28 @@ export class WorktreeManagerTUI {
   }
 
   private async refresh(): Promise<void> {
-    this.setStatus(' Refreshing...');
+    this.setStatus(' Loading worktrees...', 'blue');
     try {
       this.worktrees = await this.git.list();
       this.updateList();
       this.updateDetails();
       this.setStatus(` Loaded ${this.worktrees.length} worktrees`);
     } catch (error) {
-      this.setStatus(` Error: ${error}`, 'red');
+      const message = error instanceof GitCommandError
+        ? error.getUserMessage()
+        : (error instanceof Error ? error.message : String(error));
+      this.setStatus(` Error: ${message}`, 'red');
     }
     this.screen.render();
   }
 
   private updateList(): void {
-    const items = this.worktrees.map((wt, i) => {
+    const items = this.worktrees.map((wt) => {
       const prefix = wt.isMain ? '★ ' : '  ';
       const locked = wt.isLocked ? ' 🔒' : '';
-      return `${prefix}${truncate(wt.branch, 30)}${locked}`;
+      return `${prefix}${truncate(wt.branch, UI.BRANCH_TRUNCATE_LENGTH)}${locked}`;
     });
-    
+
     this.worktreeList.setItems(items);
     if (this.selectedIndex >= items.length) {
       this.selectedIndex = Math.max(0, items.length - 1);
@@ -234,14 +241,125 @@ export class WorktreeManagerTUI {
     this.screen.render();
   }
 
-  private promptCreateWorktree(): void {
+  private showConfirm(message: string, label: string, borderColor: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const box = blessed.box({
+        parent: this.screen,
+        left: 'center',
+        top: 'center',
+        width: UI.MODAL_WIDTH,
+        height: 5,
+        border: { type: 'line' },
+        style: {
+          border: { fg: borderColor },
+          bg: 'black'
+        },
+        label: ` ${label} `,
+        content: `${message} (y/n)`,
+        padding: { left: 1, top: 1 }
+      });
+
+      this.screen.render();
+
+      const yesHandler = () => cleanup(true);
+      const noHandler = () => cleanup(false);
+
+      const cleanup = (result: boolean) => {
+        this.screen.unkey('y', yesHandler);
+        this.screen.unkey('Y', yesHandler);
+        this.screen.unkey('n', noHandler);
+        this.screen.unkey('N', noHandler);
+        this.screen.unkey('escape', noHandler);
+        box.destroy();
+        this.screen.render();
+        resolve(result);
+      };
+
+      this.screen.key(['y', 'Y'], yesHandler);
+      this.screen.key(['n', 'N', 'escape'], noHandler);
+    });
+  }
+
+  private showHelp(): void {
+    this.isModalOpen = true;
+
+    const helpContent = `{bold}{cyan-fg}Worktree Manager Help{/}
+
+{bold}Navigation{/}
+  {cyan-fg}↑/k{/}      Move selection up
+  {cyan-fg}↓/j{/}      Move selection down
+  {cyan-fg}Enter{/}    Show worktree details
+  {cyan-fg}r{/}        Refresh worktree list
+
+{bold}Worktree Actions{/}
+  {green-fg}n{/}        Create new worktree
+  {red-fg}d{/}        Delete selected worktree
+
+{bold}Open in Editor{/}
+  {blue-fg}e{/}        Select editor (VS Code, Cursor, Zed, etc.)
+
+{bold}Terminal & AI{/}
+  {magenta-fg}t{/}        Open terminal in worktree
+  {magenta-fg}a{/}        Launch AI (Claude, Gemini, Codex)
+
+{bold}General{/}
+  {yellow-fg}?{/}        Show this help
+  {yellow-fg}q{/}        Quit application
+
+{gray-fg}Press any key to close this help...{/}`;
+
+    const box = blessed.box({
+      parent: this.screen,
+      left: 'center',
+      top: 'center',
+      width: UI.MODAL_WIDTH,
+      height: UI.HELP_MODAL_HEIGHT,
+      border: { type: 'line' },
+      style: {
+        border: { fg: 'cyan' },
+        bg: 'black'
+      },
+      label: ' Help ',
+      content: helpContent,
+      tags: true,
+      padding: { left: 1, top: 1 }
+    });
+
+    this.screen.render();
+
+    const closeHelp = () => {
+      this.screen.unkey('escape', closeHelp);
+      this.screen.unkey('enter', closeHelp);
+      this.screen.unkey('space', closeHelp);
+      this.screen.removeListener('keypress', closeHelp);
+      box.destroy();
+      this.isModalOpen = false;
+      this.screen.render();
+    };
+
+    // Listen for specific keys to close (not '?' or 'q' to avoid conflicts)
+    this.screen.key(['escape', 'enter', 'space'], closeHelp);
+    this.screen.once('keypress', closeHelp);
+  }
+
+  private async promptCreateWorktree(): Promise<void> {
+    this.isModalOpen = true;
+    this.setStatus(' Loading branches...', 'blue');
+
+    // Fetch available branches
+    const branches = await this.git.getBranches();
+
+    if (branches.length === 0) {
+      this.setStatus(' Warning: Could not load branches. Using default "main"', 'yellow');
+    }
+
     const form = blessed.form({
       parent: this.screen,
-      keys: true,
+      keys: false,
       left: 'center',
       top: 'center',
       width: 60,
-      height: 12,
+      height: UI.CREATE_FORM_HEIGHT,
       border: { type: 'line' },
       style: {
         border: { fg: 'green' },
@@ -276,40 +394,97 @@ export class WorktreeManagerTUI {
       parent: form,
       top: 6,
       left: 2,
-      content: 'Enter to create | Escape to cancel',
+      content: 'Base branch:',
+      style: { fg: 'white' }
+    });
+
+    const baseBranchList = blessed.list({
+      parent: form,
+      top: 7,
+      left: 2,
+      width: 54,
+      height: 8,
+      border: { type: 'line' },
+      style: {
+        border: { fg: 'cyan' },
+        selected: { bg: 'blue', fg: 'white' },
+        focus: { border: { fg: 'green' } }
+      },
+      keys: true,
+      vi: true,
+      items: branches.length > 0 ? branches : ['main']
+    });
+
+    // Pre-select 'main' if it exists
+    const mainIndex = branches.indexOf('main');
+    if (mainIndex >= 0) {
+      baseBranchList.select(mainIndex);
+    }
+
+    blessed.text({
+      parent: form,
+      top: 16,
+      left: 2,
+      content: 'Tab to switch | ↑↓ to select branch | Enter to create | Esc to cancel',
       style: { fg: 'gray' }
     });
 
     branchInput.focus();
+    this.setStatus(' Creating new worktree...', 'blue');
 
-    branchInput.key(['escape'], () => {
+    const submitForm = async () => {
+      this.isModalOpen = false;
+      const branch = branchInput.getValue().replace(/\t/g, '').trim();
+      const selectedIdx = (baseBranchList as blessed.Widgets.ListElement & { selected: number }).selected;
+      const branchItems = branches.length > 0 ? branches : ['main'];
+      const baseBranch = branchItems[selectedIdx] || 'main';
       form.destroy();
       this.worktreeList.focus();
-      this.screen.render();
-    });
 
-    branchInput.key(['enter'], async () => {
-      const branch = branchInput.getValue().trim();
-      form.destroy();
-      this.worktreeList.focus();
-      
       if (branch) {
-        this.setStatus(` Creating worktree for branch: ${branch}...`);
+        this.setStatus(` Creating worktree: ${branch} from ${baseBranch}...`, 'blue');
         try {
-          await this.git.create({ branch });
+          await this.git.create({ branch, baseBranch });
           await this.refresh();
           this.setStatus(` Created worktree: ${branch}`, 'green');
         } catch (error) {
-          this.setStatus(` Error: ${error}`, 'red');
+          const message = error instanceof GitCommandError
+            ? error.getUserMessage()
+            : (error instanceof Error ? error.message : String(error));
+          this.setStatus(` Error: ${message}`, 'red');
         }
+      } else {
+        this.setStatus(' Cancelled - no branch name provided', 'yellow');
       }
       this.screen.render();
+    };
+
+    const cancelForm = () => {
+      this.isModalOpen = false;
+      form.destroy();
+      this.worktreeList.focus();
+      this.setStatus(' Cancelled', 'blue');
+      this.screen.render();
+    };
+
+    branchInput.key(['escape'], cancelForm);
+    branchInput.key(['enter'], submitForm);
+    branchInput.key(['tab'], () => {
+      branchInput.setValue(branchInput.getValue().replace(/\t/g, ''));
+      branchInput.cancel();
+      baseBranchList.focus();
+    });
+
+    baseBranchList.key(['escape'], cancelForm);
+    baseBranchList.key(['enter'], submitForm);
+    baseBranchList.key(['tab'], () => {
+      branchInput.focus();
     });
 
     this.screen.render();
   }
 
-  private promptDeleteWorktree(): void {
+  private async promptDeleteWorktree(): Promise<void> {
     const wt = this.worktrees[this.selectedIndex];
     if (!wt) return;
 
@@ -318,55 +493,141 @@ export class WorktreeManagerTUI {
       return;
     }
 
-    const confirmBox = blessed.question({
-      parent: this.screen,
-      left: 'center',
-      top: 'center',
-      width: 50,
-      height: 7,
-      border: { type: 'line' },
-      style: {
-        border: { fg: 'red' },
-        bg: 'black'
-      },
-      label: ' Confirm Delete '
-    });
+    this.isModalOpen = true;
 
-    confirmBox.ask(`Delete worktree "${wt.branch}"?`, async (err, confirmed) => {
-      confirmBox.destroy();
+    const confirmed = await this.showConfirm(
+      `Delete worktree "${wt.branch}"?`,
+      'Confirm Delete',
+      'red'
+    );
+
+    if (!confirmed) {
+      this.isModalOpen = false;
       this.worktreeList.focus();
-      
-      if (confirmed) {
-        this.setStatus(` Deleting worktree: ${wt.branch}...`);
-        try {
-          await this.git.remove(wt.path, true);
-          await this.refresh();
-          this.setStatus(` Deleted worktree: ${wt.branch}`, 'green');
-        } catch (error) {
-          this.setStatus(` Error: ${error}`, 'red');
-        }
-      }
-      this.screen.render();
-    });
+      this.setStatus(' Delete cancelled', 'blue');
+      return;
+    }
 
-    this.screen.render();
+    this.setStatus(` Deleting worktree: ${wt.branch}...`, 'blue');
+    try {
+      await this.git.remove(wt.path, true);
+      await this.refresh();
+      this.setStatus(` Deleted worktree: ${wt.branch}`, 'green');
+    } catch (error) {
+      const message = error instanceof GitCommandError
+        ? error.getUserMessage()
+        : (error instanceof Error ? error.message : String(error));
+      this.setStatus(` Error: ${message}`, 'red');
+    }
+
+    this.isModalOpen = false;
+    this.worktreeList.focus();
   }
 
-  private async openSelectedInEditor(editor: 'code' | 'cursor'): Promise<void> {
+  private openInEditor(): void {
     const wt = this.worktrees[this.selectedIndex];
     if (!wt) return;
 
-    this.setStatus(` Opening ${wt.branch} in ${editor === 'code' ? 'VS Code' : 'Cursor'}...`);
-    
-    try {
-      if (editor === 'code') {
-        await openInVSCode(wt.path);
+    this.isModalOpen = true;
+
+    const editors = [
+      { name: 'VS Code', command: 'code' },
+      { name: 'Cursor', command: 'cursor' },
+      { name: 'Zed', command: 'zed' },
+      { name: 'WebStorm', command: 'webstorm' },
+      { name: 'Sublime Text', command: 'subl' },
+      { name: 'Neovim', command: 'nvim', terminal: true }
+    ];
+
+    const list = blessed.list({
+      parent: this.screen,
+      left: 'center',
+      top: 'center',
+      width: UI.SELECTOR_WIDTH,
+      height: UI.EDITOR_SELECTOR_HEIGHT,
+      border: { type: 'line' },
+      style: {
+        border: { fg: 'blue' },
+        selected: { bg: 'blue', fg: 'white' },
+        bg: 'black'
+      },
+      label: ' Select Editor ',
+      keys: true,
+      vi: true,
+      items: editors.map(e => `  ${e.name} (${e.command})`)
+    });
+
+    list.focus();
+    this.screen.render();
+
+    const cleanup = () => {
+      list.destroy();
+      this.isModalOpen = false;
+      this.worktreeList.focus();
+      this.screen.render();
+    };
+
+    list.key(['escape'], cleanup);
+
+    list.key(['enter'], () => {
+      const selectedIdx = (list as blessed.Widgets.ListElement & { selected: number }).selected;
+      const editor = editors[selectedIdx];
+      cleanup();
+      this.openEditorTool(editor.command, editor.name, editor.terminal);
+    });
+  }
+
+  private openEditorTool(command: string, name: string, terminal = false): void {
+    const wt = this.worktrees[this.selectedIndex];
+    if (!wt) return;
+
+    this.setStatus(` Opening ${wt.branch} in ${name}...`, 'blue');
+
+    const handleError = (err: Error) => {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        const hint = getInstallInstruction(command);
+        this.setStatus(` ${name} not found. ${hint}`, 'red');
       } else {
-        await openInCursor(wt.path);
+        this.setStatus(` Error: ${err.message}`, 'red');
       }
-      this.setStatus(` Opened ${wt.branch}`, 'green');
+    };
+
+    try {
+      let proc;
+      if (terminal) {
+        // Terminal-based editors need to open in a new terminal
+        if (PLATFORM.IS_MAC) {
+          const escapedPath = escapeAppleScript(wt.path);
+          const script = `
+            tell application "Terminal"
+              do script "cd '${escapedPath}' && ${command} ."
+              activate
+            end tell
+          `;
+          proc = spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' });
+        } else if (PLATFORM.IS_WIN) {
+          const escapedPath = escapeWindowsArg(wt.path);
+          proc = spawn('cmd', ['/c', 'start', 'cmd', '/k', `cd /d ${escapedPath} && ${command} .`], {
+            detached: true,
+            stdio: 'ignore',
+            shell: true
+          });
+        } else {
+          // Linux - pass path safely via argument array
+          proc = spawn('gnome-terminal', ['--working-directory', wt.path, '--', command, '.'], {
+            detached: true,
+            stdio: 'ignore'
+          });
+        }
+      } else {
+        // GUI editors can open directly - pass path via array (safe)
+        proc = spawn(command, [wt.path], { detached: true, stdio: 'ignore' });
+      }
+      proc.on('error', handleError);
+      proc.unref();
+      this.setStatus(` Opened ${wt.branch} in ${name}`, 'green');
     } catch (error) {
-      this.setStatus(` Error: ${error}`, 'red');
+      this.setStatus(` Error: ${error instanceof Error ? error.message : error}`, 'red');
     }
   }
 
@@ -374,55 +635,145 @@ export class WorktreeManagerTUI {
     const wt = this.worktrees[this.selectedIndex];
     if (!wt) return;
 
-    // Determine terminal app based on OS
-    const isWsl = process.platform === 'linux' && process.env.WSL_DISTRO_NAME;
-    const isMac = process.platform === 'darwin';
+    this.setStatus(` Opening terminal in ${wt.branch}...`, 'blue');
 
-    if (isMac) {
-      // Open in new Terminal.app tab
-      spawn('open', ['-a', 'Terminal', wt.path], { detached: true, stdio: 'ignore' });
-    } else if (isWsl) {
-      spawn('wt.exe', ['-d', wt.path], { detached: true, stdio: 'ignore' });
-    } else {
-      // Linux - try common terminal emulators
-      const terminals = ['gnome-terminal', 'konsole', 'xterm', 'terminator'];
-      for (const term of terminals) {
-        try {
-          spawn(term, ['--working-directory', wt.path], { detached: true, stdio: 'ignore' });
-          break;
-        } catch {}
+    try {
+      if (PLATFORM.IS_MAC) {
+        // Open in new Terminal.app tab - path passed as argument (safe)
+        spawn('open', ['-a', 'Terminal', wt.path], { detached: true, stdio: 'ignore' });
+      } else if (PLATFORM.IS_WIN) {
+        // Windows - escape path for cmd.exe
+        const escapedPath = escapeWindowsArg(wt.path);
+        spawn('cmd', ['/c', 'start', 'cmd', '/k', `cd /d ${escapedPath}`], {
+          detached: true,
+          stdio: 'ignore',
+          shell: true
+        });
+      } else if (PLATFORM.IS_WSL) {
+        // WSL - pass path directly to wt.exe
+        spawn('wt.exe', ['-d', wt.path], { detached: true, stdio: 'ignore' });
+      } else {
+        // Linux - try common terminal emulators, pass path via argument array (safe)
+        const terminals = ['gnome-terminal', 'konsole', 'xterm', 'terminator'];
+        let launched = false;
+        for (const term of terminals) {
+          try {
+            const proc = spawn(term, ['--working-directory', wt.path], {
+              detached: true,
+              stdio: 'ignore'
+            });
+            proc.on('error', () => { /* silent */ });
+            proc.unref();
+            launched = true;
+            break;
+          } catch {
+            // Try next terminal
+          }
+        }
+        if (!launched) {
+          this.setStatus(' No terminal emulator found. Install gnome-terminal, konsole, xterm, or terminator', 'red');
+          return;
+        }
       }
+      this.setStatus(` Opened terminal in ${wt.branch}`, 'green');
+    } catch (error) {
+      this.setStatus(` Error: ${error instanceof Error ? error.message : error}`, 'red');
     }
-
-    this.setStatus(` Opened terminal in ${wt.branch}`, 'green');
   }
 
-  private launchClaude(): void {
+  private launchAI(): void {
     const wt = this.worktrees[this.selectedIndex];
     if (!wt) return;
 
-    // Spawn Claude in the worktree directory
-    // Using the approach similar to what vibe-tree does
-    const isMac = process.platform === 'darwin';
+    this.isModalOpen = true;
 
-    if (isMac) {
-      // Use osascript to open a new Terminal window and run claude
-      const script = `
-        tell application "Terminal"
-          do script "cd '${wt.path}' && claude"
-          activate
-        end tell
-      `;
-      spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' });
-    } else {
-      // Linux - open terminal with claude
-      spawn('gnome-terminal', ['--working-directory', wt.path, '--', 'claude'], { 
-        detached: true, 
-        stdio: 'ignore' 
+    const aiTools = [
+      { name: 'Claude', command: 'claude' },
+      { name: 'Gemini', command: 'gemini' },
+      { name: 'Codex', command: 'codex' }
+    ];
+
+    const list = blessed.list({
+      parent: this.screen,
+      left: 'center',
+      top: 'center',
+      width: UI.SELECTOR_WIDTH,
+      height: UI.AI_SELECTOR_HEIGHT,
+      border: { type: 'line' },
+      style: {
+        border: { fg: 'magenta' },
+        selected: { bg: 'blue', fg: 'white' },
+        bg: 'black'
+      },
+      label: ' Select AI Tool ',
+      keys: true,
+      vi: true,
+      items: aiTools.map(t => `  ${t.name} (${t.command})`)
+    });
+
+    list.focus();
+    this.screen.render();
+
+    const cleanup = () => {
+      list.destroy();
+      this.isModalOpen = false;
+      this.worktreeList.focus();
+      this.screen.render();
+    };
+
+    list.key(['escape'], cleanup);
+
+    list.key(['enter'], () => {
+      const selectedIdx = (list as blessed.Widgets.ListElement & { selected: number }).selected;
+      const tool = aiTools[selectedIdx];
+      cleanup();
+      this.launchAITool(tool.command, tool.name);
+    });
+  }
+
+  private launchAITool(command: string, name: string): void {
+    const wt = this.worktrees[this.selectedIndex];
+    if (!wt) return;
+
+    this.setStatus(` Launching ${name} in ${wt.branch}...`, 'blue');
+
+    try {
+      let proc;
+      if (PLATFORM.IS_MAC) {
+        const escapedPath = escapeAppleScript(wt.path);
+        const script = `
+          tell application "Terminal"
+            do script "cd '${escapedPath}' && ${command}"
+            activate
+          end tell
+        `;
+        proc = spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' });
+      } else if (PLATFORM.IS_WIN) {
+        const escapedPath = escapeWindowsArg(wt.path);
+        proc = spawn('cmd', ['/c', 'start', 'cmd', '/k', `cd /d ${escapedPath} && ${command}`], {
+          detached: true,
+          stdio: 'ignore',
+          shell: true
+        });
+      } else {
+        // Linux - pass arguments via array (safe)
+        proc = spawn('gnome-terminal', ['--working-directory', wt.path, '--', command], {
+          detached: true,
+          stdio: 'ignore'
+        });
+      }
+
+      proc.on('error', (err: Error) => {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          const hint = getInstallInstruction(command);
+          this.setStatus(` ${name} not found. ${hint}`, 'red');
+        }
       });
+      proc.unref();
+      this.setStatus(` Launched ${name} in ${wt.branch}`, 'magenta');
+    } catch (error) {
+      this.setStatus(` Error: ${error instanceof Error ? error.message : error}`, 'red');
     }
-
-    this.setStatus(` Launched Claude in ${wt.branch}`, 'magenta');
   }
 
   private showDetails(): void {

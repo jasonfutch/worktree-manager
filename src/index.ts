@@ -3,9 +3,14 @@
 import { Command } from 'commander';
 import { GitWorktree } from './git/worktree.js';
 import { WorktreeManagerTUI } from './tui/app.js';
+import { runStartupChecks } from './utils/checks.js';
+import { openEditor, openTerminal, launchAI, validEditors, validAITools, type EditorType, type AIToolType } from './utils/launch.js';
 import chalk from 'chalk';
 import path from 'path';
 import fs from 'fs';
+
+// Check dependencies before anything else
+runStartupChecks();
 
 const program = new Command();
 
@@ -140,7 +145,7 @@ program
     }
 
     console.log(chalk.yellow(`Removing worktree: ${wt.branch}...`));
-    
+
     try {
       await git.remove(wt.path, options.force);
       console.log(chalk.green(`✓ Removed worktree: ${wt.branch}`));
@@ -148,6 +153,150 @@ program
       console.error(chalk.red(`Error: ${error}`));
       process.exit(1);
     }
+  });
+
+// Helper to find worktree by branch or path
+async function findWorktree(branchOrPath: string, repoPath: string) {
+  const resolvedPath = path.resolve(repoPath || '.');
+  const repoRoot = GitWorktree.getRepoRoot(resolvedPath);
+
+  if (!repoRoot) {
+    console.error(chalk.red('Not a git repository'));
+    process.exit(1);
+  }
+
+  const git = new GitWorktree(repoRoot);
+  const worktrees = await git.list();
+
+  const wt = worktrees.find(w =>
+    w.branch === branchOrPath ||
+    w.path === branchOrPath ||
+    w.path.endsWith(branchOrPath) ||
+    w.name === branchOrPath
+  );
+
+  if (!wt) {
+    console.error(chalk.red(`Worktree not found: ${branchOrPath}`));
+    process.exit(1);
+  }
+
+  return wt;
+}
+
+// Subcommand: open worktree in editor
+program
+  .command('open <branch-or-path>')
+  .description('Open a worktree in an editor')
+  .argument('[repo-path]', 'Path to git repository', '.')
+  .option('-e, --editor <editor>', `Editor to use (${validEditors.join(', ')})`, 'code')
+  .action(async (branchOrPath: string, repoPath: string, options: { editor: string }) => {
+    const editor = options.editor as EditorType;
+
+    if (!validEditors.includes(editor)) {
+      console.error(chalk.red(`Invalid editor: ${editor}`));
+      console.error(chalk.gray(`Valid options: ${validEditors.join(', ')}`));
+      process.exit(1);
+    }
+
+    const wt = await findWorktree(branchOrPath, repoPath);
+    console.log(chalk.cyan(`Opening ${wt.branch} in ${editor}...`));
+    openEditor(wt.path, editor);
+  });
+
+// Subcommand: open terminal in worktree
+program
+  .command('terminal <branch-or-path>')
+  .alias('term')
+  .description('Open a terminal in a worktree')
+  .argument('[repo-path]', 'Path to git repository', '.')
+  .action(async (branchOrPath: string, repoPath: string) => {
+    const wt = await findWorktree(branchOrPath, repoPath);
+    console.log(chalk.cyan(`Opening terminal in ${wt.branch}...`));
+    openTerminal(wt.path);
+  });
+
+// Subcommand: launch AI tool in worktree
+program
+  .command('ai <branch-or-path>')
+  .description('Launch an AI tool in a worktree')
+  .argument('[repo-path]', 'Path to git repository', '.')
+  .option('-t, --tool <tool>', `AI tool to use (${validAITools.join(', ')})`, 'claude')
+  .action(async (branchOrPath: string, repoPath: string, options: { tool: string }) => {
+    const tool = options.tool as AIToolType;
+
+    if (!validAITools.includes(tool)) {
+      console.error(chalk.red(`Invalid AI tool: ${tool}`));
+      console.error(chalk.gray(`Valid options: ${validAITools.join(', ')}`));
+      process.exit(1);
+    }
+
+    const wt = await findWorktree(branchOrPath, repoPath);
+    console.log(chalk.cyan(`Launching ${tool} in ${wt.branch}...`));
+    launchAI(wt.path, tool);
+  });
+
+// Subcommand: help with examples
+program
+  .command('help')
+  .description('Show detailed help and examples')
+  .action(() => {
+    console.log(`
+${chalk.cyan.bold('Worktree Manager')} - Terminal app for managing git worktrees
+
+${chalk.yellow.bold('QUICK START')}
+  ${chalk.gray('Launch TUI in current repo:')}
+  $ ${chalk.green('wtm')}
+
+  ${chalk.gray('Launch TUI for specific repo:')}
+  $ ${chalk.green('wtm /path/to/repo')}
+
+${chalk.yellow.bold('CLI COMMANDS')}
+
+  ${chalk.cyan('wtm list')} ${chalk.gray('[path]')}
+    List all worktrees
+    $ wtm list
+    $ wtm list /path/to/repo
+
+  ${chalk.cyan('wtm create')} ${chalk.white('<branch>')} ${chalk.gray('[path] [-b base] [-p path]')}
+    Create a new worktree
+    $ wtm create feature/login
+    $ wtm create feature/api -b develop
+    $ wtm create bugfix/issue-42 -p /custom/path
+
+  ${chalk.cyan('wtm remove')} ${chalk.white('<branch>')} ${chalk.gray('[path] [-f]')}
+    Remove a worktree
+    $ wtm remove feature/login
+    $ wtm remove feature/old --force
+
+  ${chalk.cyan('wtm open')} ${chalk.white('<branch>')} ${chalk.gray('[path] [-e editor]')}
+    Open worktree in editor
+    $ wtm open feature/login
+    $ wtm open main -e cursor
+    ${chalk.gray('Editors: code, cursor, zed, webstorm, subl, nvim')}
+
+  ${chalk.cyan('wtm terminal')} ${chalk.white('<branch>')} ${chalk.gray('[path]')}
+    Open terminal in worktree
+    $ wtm terminal feature/login
+    $ wtm term main
+
+  ${chalk.cyan('wtm ai')} ${chalk.white('<branch>')} ${chalk.gray('[path] [-t tool]')}
+    Launch AI tool in worktree
+    $ wtm ai feature/login
+    $ wtm ai main -t gemini
+    ${chalk.gray('Tools: claude, gemini, codex')}
+
+${chalk.yellow.bold('TUI KEYBINDINGS')}
+  ${chalk.cyan('↑/k, ↓/j')}    Navigate worktrees
+  ${chalk.cyan('Enter')}       Show details
+  ${chalk.cyan('n')}           Create new worktree
+  ${chalk.cyan('d')}           Delete worktree
+  ${chalk.cyan('e')}           Open in editor
+  ${chalk.cyan('t')}           Open terminal
+  ${chalk.cyan('a')}           Launch AI tool
+  ${chalk.cyan('r')}           Refresh list
+  ${chalk.cyan('?')}           Show help
+  ${chalk.cyan('q')}           Quit
+`);
   });
 
 program.parse();

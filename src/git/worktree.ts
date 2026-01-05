@@ -3,6 +3,15 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
 import type { Worktree, CreateWorktreeOptions } from '../types.js';
+import {
+  GitCommandError,
+  WorktreeNotFoundError,
+  InvalidBranchError,
+  InvalidPathError,
+  parseGitError,
+} from '../errors.js';
+import { isPathSafe, isValidBranchName, escapeShellArg } from '../utils/shell.js';
+import { GIT } from '../constants.js';
 
 const execAsync = promisify(exec);
 
@@ -45,8 +54,9 @@ export class GitWorktree {
    * List all worktrees for this repository
    */
   async list(): Promise<Worktree[]> {
+    const command = 'git worktree list --porcelain';
     try {
-      const { stdout } = await execAsync('git worktree list --porcelain', {
+      const { stdout } = await execAsync(command, {
         cwd: this.repoPath
       });
 
@@ -55,12 +65,13 @@ export class GitWorktree {
 
       for (const entry of entries) {
         if (!entry.trim()) continue;
-        
+
         const lines = entry.split('\n');
         const worktree: Partial<Worktree> = {
           isMain: false,
           isBare: false,
-          isLocked: false
+          isLocked: false,
+          prunable: false,
         };
 
         for (const line of lines) {
@@ -68,13 +79,22 @@ export class GitWorktree {
             worktree.path = line.substring(9);
             worktree.name = path.basename(worktree.path);
           } else if (line.startsWith('HEAD ')) {
-            worktree.commit = line.substring(5, 12); // Short SHA
+            // Extract SHA safely - handle variable length commits
+            const sha = line.substring(5);
+            worktree.commit = sha.substring(0, GIT.SHORT_SHA_LENGTH);
           } else if (line.startsWith('branch ')) {
-            worktree.branch = line.substring(7).replace('refs/heads/', '');
+            // Parse branch reference more robustly
+            const ref = line.substring(7);
+            worktree.branch = ref.replace(/^refs\/heads\//, '');
           } else if (line === 'bare') {
             worktree.isBare = true;
           } else if (line === 'locked') {
             worktree.isLocked = true;
+          } else if (line.startsWith('locked ')) {
+            worktree.isLocked = true;
+            worktree.lockedReason = line.substring(7);
+          } else if (line === 'prunable') {
+            worktree.prunable = true;
           } else if (line === 'detached') {
             worktree.branch = 'HEAD (detached)';
           }
@@ -92,7 +112,7 @@ export class GitWorktree {
 
       return worktrees;
     } catch (error) {
-      throw new Error(`Failed to list worktrees: ${error}`);
+      throw parseGitError(error, command);
     }
   }
 
@@ -100,14 +120,25 @@ export class GitWorktree {
    * Create a new worktree
    */
   async create(options: CreateWorktreeOptions): Promise<Worktree> {
-    const { branch, baseBranch = 'main', path: customPath } = options;
-    
+    const { branch, baseBranch = GIT.DEFAULT_BASE_BRANCH, path: customPath } = options;
+
+    // Validate branch name
+    if (!isValidBranchName(branch)) {
+      throw new InvalidBranchError(branch, 'Branch names cannot contain spaces, .., or special characters');
+    }
+
     // Generate worktree path if not provided
     const worktreePath = customPath || path.join(
       path.dirname(this.repoPath),
-      'worktrees',
+      GIT.WORKTREES_DIR,
       branch.replace(/\//g, '-')
     );
+
+    // Validate path doesn't contain traversal attempts
+    const repoParent = path.dirname(this.repoPath);
+    if (!isPathSafe(worktreePath, repoParent)) {
+      throw new InvalidPathError(worktreePath, 'Path contains invalid characters or traversal attempts');
+    }
 
     // Ensure parent directory exists
     const parentDir = path.dirname(worktreePath);
@@ -118,31 +149,37 @@ export class GitWorktree {
     try {
       // Check if branch exists
       const branchExists = await this.branchExists(branch);
-      
+
+      // Use escaped arguments for safety
+      const escapedPath = escapeShellArg(worktreePath);
+      const escapedBranch = escapeShellArg(branch);
+      const escapedBase = escapeShellArg(baseBranch);
+
+      let command: string;
       if (branchExists) {
         // Checkout existing branch
-        await execAsync(`git worktree add "${worktreePath}" "${branch}"`, {
-          cwd: this.repoPath
-        });
+        command = `git worktree add ${escapedPath} ${escapedBranch}`;
       } else {
         // Create new branch from base
-        await execAsync(
-          `git worktree add -b "${branch}" "${worktreePath}" "${baseBranch}"`,
-          { cwd: this.repoPath }
-        );
+        command = `git worktree add -b ${escapedBranch} ${escapedPath} ${escapedBase}`;
       }
+
+      await execAsync(command, { cwd: this.repoPath });
 
       // Get the created worktree info
       const worktrees = await this.list();
       const created = worktrees.find(wt => wt.path === worktreePath);
-      
+
       if (!created) {
-        throw new Error('Worktree created but not found in list');
+        throw new WorktreeNotFoundError(worktreePath);
       }
 
       return created;
     } catch (error) {
-      throw new Error(`Failed to create worktree: ${error}`);
+      if (error instanceof WorktreeNotFoundError) {
+        throw error;
+      }
+      throw parseGitError(error, `git worktree add ${branch}`);
     }
   }
 
@@ -150,13 +187,24 @@ export class GitWorktree {
    * Remove a worktree
    */
   async remove(worktreePath: string, force = false): Promise<void> {
+    // Validate path
+    if (!isPathSafe(worktreePath)) {
+      throw new InvalidPathError(worktreePath, 'Path contains invalid characters');
+    }
+
+    const escapedPath = escapeShellArg(worktreePath);
+    const forceFlag = force ? '--force' : '';
+    const command = `git worktree remove ${forceFlag} ${escapedPath}`;
+
     try {
-      const forceFlag = force ? '--force' : '';
-      await execAsync(`git worktree remove ${forceFlag} "${worktreePath}"`, {
-        cwd: this.repoPath
-      });
+      await execAsync(command, { cwd: this.repoPath });
     } catch (error) {
-      throw new Error(`Failed to remove worktree: ${error}`);
+      const gitError = parseGitError(error, command);
+      // Check if it's a not-found error
+      if (gitError.stderr.includes('is not a working tree')) {
+        throw new WorktreeNotFoundError(worktreePath);
+      }
+      throw gitError;
     }
   }
 
@@ -164,19 +212,23 @@ export class GitWorktree {
    * Prune worktrees (clean up stale entries)
    */
   async prune(): Promise<void> {
+    const command = 'git worktree prune';
     try {
-      await execAsync('git worktree prune', { cwd: this.repoPath });
+      await execAsync(command, { cwd: this.repoPath });
     } catch (error) {
-      throw new Error(`Failed to prune worktrees: ${error}`);
+      throw parseGitError(error, command);
     }
   }
 
   /**
    * Check if a branch exists
+   * @returns true if branch exists, false otherwise
+   * @note This method returns false on any error (including invalid branch names)
    */
   private async branchExists(branch: string): Promise<boolean> {
     try {
-      await execAsync(`git rev-parse --verify "${branch}"`, {
+      const escapedBranch = escapeShellArg(branch);
+      await execAsync(`git rev-parse --verify ${escapedBranch}`, {
         cwd: this.repoPath
       });
       return true;
@@ -186,21 +238,26 @@ export class GitWorktree {
   }
 
   /**
-   * Get list of all branches
+   * Get list of all local branches
+   * @returns Array of branch names, empty array on error
+   * @note This method returns empty array on any error
    */
   async getBranches(): Promise<string[]> {
     try {
       const { stdout } = await execAsync('git branch -a --format="%(refname:short)"', {
         cwd: this.repoPath
       });
-      return stdout.trim().split('\n').filter(b => b);
+      return stdout.trim().split('\n').filter(b => b && !b.startsWith('origin/'));
     } catch {
+      // Return empty array on error - caller should handle empty results
       return [];
     }
   }
 
   /**
    * Get current branch name
+   * @returns Current branch name, or 'unknown' on error
+   * @note This method returns 'unknown' on any error
    */
   async getCurrentBranch(): Promise<string> {
     try {

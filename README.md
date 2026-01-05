@@ -1,26 +1,25 @@
 # Worktree Manager
 
-A terminal app for managing git worktrees with AI assistance - similar to [vibe-tree](https://github.com/sahithvibudhi/vibe-tree).
+A terminal app for managing git worktrees with AI assistance.
 
 ## Features
 
 - **TUI Interface** - Full terminal UI built with blessed
 - **Git Worktree Management** - Create, list, and remove worktrees
-- **IDE Integration** - Open worktrees in VS Code or Cursor
-- **Claude Integration** - Launch Claude Code in any worktree
+- **IDE Integration** - Open worktrees in VS Code, Cursor, Zed, and more
+- **AI Integration** - Launch Claude, Gemini, or Codex in any worktree
 - **Parallel Development** - Work on multiple features simultaneously
+
+## Requirements
+
+- Node.js >= 18
+- Git
+- Optional: VS Code, Cursor, Zed, Claude CLI
 
 ## Installation
 
 ```bash
-# Clone and install
-git clone <your-repo>
-cd worktree-manager
-npm install
-npm run build
-
-# Link globally (optional)
-npm link
+npm install -g worktree-manager
 ```
 
 ## Usage
@@ -37,19 +36,19 @@ wtm /path/to/repo
 
 ### Keybindings
 
-| Key | Action |
-|-----|--------|
-| `↑/k` | Move up |
-| `↓/j` | Move down |
-| `Enter` | Select/Details |
-| `n` | Create new worktree |
-| `d` | Delete worktree |
-| `c` | Open in VS Code |
-| `u` | Open in Cursor |
-| `t` | Open terminal |
-| `a` | Launch Claude |
-| `r` | Refresh |
-| `q` | Quit |
+| Key     | Action                    |
+| ------- | ------------------------- |
+| `↑/k`   | Move up                   |
+| `↓/j`   | Move down                 |
+| `Enter` | Select/Details            |
+| `n`     | Create new worktree       |
+| `d`     | Delete worktree           |
+| `e`     | Open in editor (selector) |
+| `t`     | Open terminal             |
+| `a`     | Launch AI tool (selector) |
+| `r`     | Refresh                   |
+| `?`     | Help                      |
+| `q`     | Quit                      |
 
 ### CLI Commands
 
@@ -68,64 +67,78 @@ wtm remove feature/my-feature
 wtm remove feature/my-feature --force
 ```
 
+## How It Works
+
+1. **Worktrees** - Uses `git worktree` to create isolated working directories for each branch
+2. **Parallel Development** - Each worktree is independent, allowing you to run different AI coding sessions
+3. **IDE Integration** - Opens editors in the worktree directory so your AI assistant has the right context
+4. **Terminal Sessions** - Opens new terminal windows/tabs in the worktree directory
+
+## Screenshots
+
+### Main Interface
+
+![Main TUI](assets/screenshots/main-view.png)
+
+### Create New Worktree
+
+![Create Worktree](assets/screenshots/create-worktree.png)
+
+### Editor Selection
+
+![Editor Selector](assets/screenshots/editor-selector.png)
+
+### AI Tool Selection
+
+![AI Selector](assets/screenshots/ai-selector.png)
+
+---
+
+## Development
+
+### Installation from Source
+
+```bash
+git clone https://github.com/your-username/worktree-manager
+cd worktree-manager
+npm install
+npm run build
+
+# Link globally for testing
+npm link
+```
+
+### Commands
+
+```bash
+npm run dev      # Run in development mode
+npm run build    # Build TypeScript
+npm run clean    # Clean build artifacts
+```
+
 ## Architecture
 
 ```
 worktree-manager/
 ├── src/
-│   ├── index.ts        # CLI entry point
-│   ├── types.ts        # TypeScript types
+│   ├── index.ts          # CLI entry point
+│   ├── types.ts          # TypeScript types
+│   ├── errors.ts         # Custom error classes
+│   ├── constants.ts      # Application constants
 │   ├── git/
-│   │   └── worktree.ts # Git worktree operations
+│   │   └── worktree.ts   # Git worktree operations
 │   ├── tui/
-│   │   └── app.ts      # Blessed TUI application
+│   │   └── app.ts        # Blessed TUI application
 │   └── utils/
-│       └── helpers.ts  # Utility functions
-├── dist/               # Compiled output
+│       ├── helpers.ts    # Utility functions
+│       ├── shell.ts      # Shell escaping utilities
+│       ├── launch.ts     # Editor/terminal launchers
+│       └── checks.ts     # Startup validation
+├── dist/                 # Compiled output
 ├── package.json
 ├── tsconfig.json
 └── README.md
 ```
-
-## How It Works
-
-1. **Worktrees** - Uses `git worktree` to create isolated working directories for each branch
-2. **Parallel Development** - Each worktree is independent, allowing you to run different Claude Code instances
-3. **IDE Integration** - Opens editors in the worktree directory so Claude has the right context
-4. **Terminal Sessions** - Opens new terminal windows/tabs in the worktree directory
-
-## Comparison with vibe-tree
-
-| Feature | vibe-tree | worktree-manager |
-|---------|-----------|------------------|
-| Electron Desktop App | ✅ | ❌ |
-| Web Interface | ✅ | ❌ |
-| Terminal TUI | ❌ | ✅ |
-| Persistent PTY | ✅ | ❌ (opens new terminals) |
-| Claude Integration | ✅ | ✅ |
-| IDE Integration | ✅ | ✅ |
-| Docker Deploy | ✅ | ❌ |
-
-This is a simpler, terminal-focused alternative. For the full vibe-tree experience with Electron and web support, use the original project.
-
-## Development
-
-```bash
-# Run in development mode
-npm run dev
-
-# Build
-npm run build
-
-# Clean
-npm run clean
-```
-
-## Requirements
-
-- Node.js >= 18
-- Git
-- Optional: VS Code, Cursor, Claude CLI
 
 ## License
 
