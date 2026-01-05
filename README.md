@@ -65,6 +65,23 @@ wtm create feature/my-feature -p /custom/path
 # Remove a worktree
 wtm remove feature/my-feature
 wtm remove feature/my-feature --force
+
+# Open worktree in editor
+wtm open feature/my-feature
+wtm open main -e cursor
+# Editors: code, cursor, zed, webstorm, subl, nvim
+
+# Open terminal in worktree
+wtm terminal feature/my-feature
+wtm term main
+
+# Launch AI tool in worktree
+wtm ai feature/my-feature
+wtm ai main -t gemini
+# Tools: claude, gemini, codex
+
+# Show detailed help
+wtm help
 ```
 
 ## How It Works

@@ -43,7 +43,7 @@ export class WorktreeManagerTUI {
       width: '100%',
       height: '100%-1',
       style: {
-        bg: 'black'
+        bg: 'default'
       }
     });
 
@@ -59,10 +59,10 @@ export class WorktreeManagerTUI {
       style: {
         border: { fg: 'cyan' },
         selected: { bg: 'blue', fg: 'white', bold: true },
-        item: { fg: 'white' }
+        item: { fg: 'default' }
       },
-      keys: true,
-      vi: true,
+      keys: false,
+      vi: false,
       mouse: true,
       scrollbar: {
         ch: '│',
@@ -77,7 +77,7 @@ export class WorktreeManagerTUI {
       top: 0,
       left: '50%',
       width: '50%',
-      height: '50%',
+      height: '40%',
       border: { type: 'line' },
       style: {
         border: { fg: 'green' }
@@ -91,10 +91,10 @@ export class WorktreeManagerTUI {
     this.helpBox = blessed.box({
       parent: this.mainBox,
       label: ' ⌨️  Keybindings ',
-      top: '50%',
+      top: '40%',
       left: '50%',
       width: '50%',
-      height: '50%-3',
+      height: '60%-3',
       border: { type: 'line' },
       style: {
         border: { fg: 'yellow' }
@@ -192,17 +192,12 @@ export class WorktreeManagerTUI {
     const mainBadge = wt.isMain ? ' {green-fg}[MAIN]{/}' : '';
     const lockedBadge = wt.isLocked ? ' {red-fg}[LOCKED]{/}' : '';
 
-    this.detailBox.setContent(`{bold}Branch:{/} {cyan-fg}${wt.branch}{/}${mainBadge}${lockedBadge}
-
-{bold}Path:{/}
-  ${wt.path}
-
+    this.detailBox.setContent(`{bold}Repo:{/} {magenta-fg}${this.repoName}{/}
+{bold}Branch:{/} {cyan-fg}${wt.branch}{/}${mainBadge}${lockedBadge}
+{bold}Path:{/} ${wt.path}
 {bold}Commit:{/} {yellow-fg}${wt.commit}{/}
-
 {bold}Name:{/} ${wt.name}
-
-{bold}Status:{/} ${wt.isBare ? 'Bare' : 'Active'}
-`);
+{bold}Status:{/} ${wt.isBare ? 'Bare' : 'Active'}`);
   }
 
   private async refresh(): Promise<void> {
@@ -252,7 +247,7 @@ export class WorktreeManagerTUI {
         border: { type: 'line' },
         style: {
           border: { fg: borderColor },
-          bg: 'black'
+          bg: 'default'
         },
         label: ` ${label} `,
         content: `${message} (y/n)`,
@@ -281,6 +276,7 @@ export class WorktreeManagerTUI {
   }
 
   private showHelp(): void {
+    if (this.isModalOpen) return;
     this.isModalOpen = true;
 
     const helpContent = `{bold}{cyan-fg}Worktree Manager Help{/}
@@ -317,7 +313,7 @@ export class WorktreeManagerTUI {
       border: { type: 'line' },
       style: {
         border: { fg: 'cyan' },
-        bg: 'black'
+        bg: 'default'
       },
       label: ' Help ',
       content: helpContent,
@@ -343,6 +339,7 @@ export class WorktreeManagerTUI {
   }
 
   private async promptCreateWorktree(): Promise<void> {
+    if (this.isModalOpen) return;
     this.isModalOpen = true;
     this.setStatus(' Loading branches...', 'blue');
 
@@ -363,7 +360,7 @@ export class WorktreeManagerTUI {
       border: { type: 'line' },
       style: {
         border: { fg: 'green' },
-        bg: 'black'
+        bg: 'default'
       },
       label: ' Create New Worktree '
     });
@@ -373,7 +370,7 @@ export class WorktreeManagerTUI {
       top: 1,
       left: 2,
       content: 'Branch name:',
-      style: { fg: 'white' }
+      style: { fg: 'default' }
     });
 
     const branchInput = blessed.textbox({
@@ -395,7 +392,7 @@ export class WorktreeManagerTUI {
       top: 6,
       left: 2,
       content: 'Base branch:',
-      style: { fg: 'white' }
+      style: { fg: 'default' }
     });
 
     const baseBranchList = blessed.list({
@@ -485,6 +482,7 @@ export class WorktreeManagerTUI {
   }
 
   private async promptDeleteWorktree(): Promise<void> {
+    if (this.isModalOpen) return;
     const wt = this.worktrees[this.selectedIndex];
     if (!wt) return;
 
@@ -525,6 +523,7 @@ export class WorktreeManagerTUI {
   }
 
   private openInEditor(): void {
+    if (this.isModalOpen) return;
     const wt = this.worktrees[this.selectedIndex];
     if (!wt) return;
 
@@ -549,7 +548,7 @@ export class WorktreeManagerTUI {
       style: {
         border: { fg: 'blue' },
         selected: { bg: 'blue', fg: 'white' },
-        bg: 'black'
+        bg: 'default'
       },
       label: ' Select Editor ',
       keys: true,
@@ -682,6 +681,7 @@ export class WorktreeManagerTUI {
   }
 
   private launchAI(): void {
+    if (this.isModalOpen) return;
     const wt = this.worktrees[this.selectedIndex];
     if (!wt) return;
 
@@ -703,7 +703,7 @@ export class WorktreeManagerTUI {
       style: {
         border: { fg: 'magenta' },
         selected: { bg: 'blue', fg: 'white' },
-        bg: 'black'
+        bg: 'default'
       },
       label: ' Select AI Tool ',
       keys: true,
