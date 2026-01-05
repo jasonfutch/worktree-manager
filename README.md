@@ -101,11 +101,11 @@ wtm help
 
 ![Create Worktree](assets/screenshots/create-worktree.png)
 
-### Editor Selection
+### Open In Editor
 
 ![Editor Selector](assets/screenshots/editor-selector.png)
 
-### AI Tool Selection
+### Open In AI Tool
 
 ![AI Selector](assets/screenshots/ai-selector.png)
 
