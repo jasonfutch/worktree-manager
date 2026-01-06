@@ -583,8 +583,27 @@ export class WorktreeManagerTUI {
     const branchName = wt.branch;
     this.setStatus(` Deleting worktree: ${branchName}...`, 'blue');
 
+    // Show loading indicator in center of screen
+    const loadingBox = blessed.box({
+      parent: this.screen,
+      left: 'center',
+      top: 'center',
+      width: 40,
+      height: 5,
+      border: { type: 'line' },
+      style: {
+        border: { fg: 'yellow' },
+        bg: 'default'
+      },
+      label: ' Please Wait ',
+      content: `\n  Deleting worktree...\n  This may take a moment.`,
+      tags: true
+    });
+    this.screen.render();
+
     try {
       await this.git.remove(wt.path, true);
+      loadingBox.destroy();
       await this.refresh();
       this.setStatus(` Deleted worktree: ${branchName}`, 'green');
 
@@ -613,6 +632,7 @@ export class WorktreeManagerTUI {
         }
       }
     } catch (error) {
+      loadingBox.destroy();
       const message = error instanceof GitCommandError
         ? error.getUserMessage()
         : (error instanceof Error ? error.message : String(error));
