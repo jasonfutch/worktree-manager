@@ -40,6 +40,22 @@ export const GIT = {
 
   /** Directory name for worktrees relative to repo */
   WORKTREES_DIR: 'worktrees',
+
+  /** Branches that should never be offered for deletion */
+  PROTECTED_BRANCHES: [
+    'main',
+    'master',
+    'production',
+    'prod',
+    'dev',
+    'develop',
+    'development',
+    'qa',
+    'stage',
+    'staging',
+    'release',
+    'hotfix',
+  ],
 } as const;
 
 /**
