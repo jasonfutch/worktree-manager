@@ -8,9 +8,34 @@ import { openEditor, openTerminal, launchAI, validEditors, validAITools, type Ed
 import chalk from 'chalk';
 import path from 'path';
 import fs from 'fs';
+import readline from 'readline';
+import { GIT } from './constants.js';
 
 // Check dependencies before anything else
 runStartupChecks();
+
+// Helper to prompt user for input
+function promptUser(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+// Helper to check if a branch is protected
+function isProtectedBranch(branch: string): boolean {
+  const normalizedBranch = branch.toLowerCase();
+  return GIT.PROTECTED_BRANCHES.some(
+    protectedBranch => normalizedBranch === protectedBranch.toLowerCase()
+  );
+}
 
 const program = new Command();
 
@@ -118,7 +143,7 @@ program
   .action(async (branchOrPath: string, repoPath: string, options: { force?: boolean }) => {
     const resolvedPath = path.resolve(repoPath || '.');
     const repoRoot = GitWorktree.getRepoRoot(resolvedPath);
-    
+
     if (!repoRoot) {
       console.error(chalk.red('Not a git repository'));
       process.exit(1);
@@ -126,14 +151,14 @@ program
 
     const git = new GitWorktree(repoRoot);
     const worktrees = await git.list();
-    
+
     // Find worktree by branch name or path
-    const wt = worktrees.find(w => 
-      w.branch === branchOrPath || 
+    const wt = worktrees.find(w =>
+      w.branch === branchOrPath ||
       w.path === branchOrPath ||
       w.path.endsWith(branchOrPath)
     );
-    
+
     if (!wt) {
       console.error(chalk.red(`Worktree not found: ${branchOrPath}`));
       process.exit(1);
@@ -144,11 +169,31 @@ program
       process.exit(1);
     }
 
-    console.log(chalk.yellow(`Removing worktree: ${wt.branch}...`));
+    const branchName = wt.branch;
+    console.log(chalk.yellow(`Removing worktree: ${branchName}...`));
 
     try {
       await git.remove(wt.path, options.force);
-      console.log(chalk.green(`✓ Removed worktree: ${wt.branch}`));
+      console.log(chalk.green(`✓ Removed worktree: ${branchName}`));
+
+      // Ask about branch deletion (only for non-protected branches)
+      if (!isProtectedBranch(branchName)) {
+        const answer = await promptUser(
+          chalk.yellow(`\nAlso delete branch "${branchName}"? Type "yes" to confirm (or press Enter to skip): `)
+        );
+
+        if (answer === 'yes') {
+          console.log(chalk.yellow(`Deleting branch: ${branchName}...`));
+          try {
+            await git.deleteBranch(branchName, true);
+            console.log(chalk.green(`✓ Deleted branch: ${branchName}`));
+          } catch (branchError) {
+            console.error(chalk.yellow(`⚠ Branch deletion failed: ${branchError}`));
+          }
+        } else {
+          console.log(chalk.gray(`Branch "${branchName}" kept.`));
+        }
+      }
     } catch (error) {
       console.error(chalk.red(`Error: ${error}`));
       process.exit(1);

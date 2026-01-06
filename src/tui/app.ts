@@ -4,7 +4,7 @@ import { truncate } from '../utils/helpers.js';
 import type { Worktree } from '../types.js';
 import { spawn } from 'child_process';
 import { escapeAppleScript, escapeWindowsArg } from '../utils/shell.js';
-import { UI, PLATFORM, getInstallInstruction } from '../constants.js';
+import { UI, PLATFORM, GIT, getInstallInstruction } from '../constants.js';
 import { GitCommandError } from '../errors.js';
 
 export class WorktreeManagerTUI {
@@ -275,6 +275,77 @@ export class WorktreeManagerTUI {
     });
   }
 
+  private showTextInputConfirm(message: string, label: string, borderColor: string, requiredInput: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const box = blessed.box({
+        parent: this.screen,
+        left: 'center',
+        top: 'center',
+        width: UI.MODAL_WIDTH,
+        height: 8,
+        border: { type: 'line' },
+        style: {
+          border: { fg: borderColor },
+          bg: 'default'
+        },
+        label: ` ${label} `,
+        padding: { left: 1, top: 0 }
+      });
+
+      blessed.text({
+        parent: box,
+        top: 0,
+        left: 0,
+        content: message,
+        style: { fg: 'default' }
+      });
+
+      blessed.text({
+        parent: box,
+        top: 1,
+        left: 0,
+        content: `Type "${requiredInput}" to confirm (Esc to cancel):`,
+        style: { fg: 'gray' }
+      });
+
+      const input = blessed.textbox({
+        parent: box,
+        top: 2,
+        left: 0,
+        width: UI.MODAL_WIDTH - 6,
+        height: 3,
+        border: { type: 'line' },
+        style: {
+          border: { fg: 'cyan' },
+          focus: { border: { fg: 'green' } }
+        },
+        inputOnFocus: true
+      });
+
+      this.screen.render();
+      input.focus();
+
+      const cleanup = (result: boolean) => {
+        box.destroy();
+        this.screen.render();
+        resolve(result);
+      };
+
+      input.key(['escape'], () => cleanup(false));
+      input.key(['enter'], () => {
+        const value = input.getValue().trim();
+        cleanup(value === requiredInput);
+      });
+    });
+  }
+
+  private isProtectedBranch(branch: string): boolean {
+    const normalizedBranch = branch.toLowerCase();
+    return GIT.PROTECTED_BRANCHES.some(
+      protected_branch => normalizedBranch === protected_branch.toLowerCase()
+    );
+  }
+
   private showHelp(): void {
     if (this.isModalOpen) return;
     this.isModalOpen = true;
@@ -506,11 +577,38 @@ export class WorktreeManagerTUI {
       return;
     }
 
-    this.setStatus(` Deleting worktree: ${wt.branch}...`, 'blue');
+    const branchName = wt.branch;
+    this.setStatus(` Deleting worktree: ${branchName}...`, 'blue');
+
     try {
       await this.git.remove(wt.path, true);
       await this.refresh();
-      this.setStatus(` Deleted worktree: ${wt.branch}`, 'green');
+      this.setStatus(` Deleted worktree: ${branchName}`, 'green');
+
+      // Ask about branch deletion (only for non-protected branches)
+      if (!this.isProtectedBranch(branchName)) {
+        const deleteBranch = await this.showTextInputConfirm(
+          `Also delete branch "${branchName}"?`,
+          'Delete Branch',
+          'yellow',
+          'yes'
+        );
+
+        if (deleteBranch) {
+          this.setStatus(` Deleting branch: ${branchName}...`, 'blue');
+          try {
+            await this.git.deleteBranch(branchName, true);
+            this.setStatus(` Deleted worktree and branch: ${branchName}`, 'green');
+          } catch (branchError) {
+            const message = branchError instanceof GitCommandError
+              ? branchError.getUserMessage()
+              : (branchError instanceof Error ? branchError.message : String(branchError));
+            this.setStatus(` Worktree deleted, but branch deletion failed: ${message}`, 'yellow');
+          }
+        } else {
+          this.setStatus(` Deleted worktree: ${branchName} (branch kept)`, 'green');
+        }
+      }
     } catch (error) {
       const message = error instanceof GitCommandError
         ? error.getUserMessage()

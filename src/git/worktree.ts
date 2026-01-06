@@ -221,6 +221,27 @@ export class GitWorktree {
   }
 
   /**
+   * Delete a branch
+   * @param branch - Branch name to delete
+   * @param force - If true, use -D (force delete) instead of -d
+   */
+  async deleteBranch(branch: string, force = false): Promise<void> {
+    if (!isValidBranchName(branch)) {
+      throw new InvalidBranchError(branch, 'Invalid branch name');
+    }
+
+    const escapedBranch = escapeShellArg(branch);
+    const flag = force ? '-D' : '-d';
+    const command = `git branch ${flag} ${escapedBranch}`;
+
+    try {
+      await execAsync(command, { cwd: this.repoPath });
+    } catch (error) {
+      throw parseGitError(error, command);
+    }
+  }
+
+  /**
    * Check if a branch exists
    * @returns true if branch exists, false otherwise
    * @note This method returns false on any error (including invalid branch names)
