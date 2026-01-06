@@ -22,6 +22,8 @@ export class WorktreeManagerTUI {
   private repoPath: string;
   private repoName: string;
   private isModalOpen = false;
+  private autoRefreshInterval: NodeJS.Timeout | null = null;
+  private readonly AUTO_REFRESH_MS = 15000;
 
   constructor(repoPath: string) {
     this.repoPath = repoPath;
@@ -135,6 +137,7 @@ export class WorktreeManagerTUI {
   private setupKeyBindings(): void {
     // Quit
     this.screen.key(['q', 'C-c'], () => {
+      this.stopAutoRefresh();
       this.screen.destroy();
       process.exit(0);
     });
@@ -782,8 +785,26 @@ export class WorktreeManagerTUI {
     this.screen.render();
   }
 
+  private startAutoRefresh(): void {
+    this.stopAutoRefresh();
+    this.autoRefreshInterval = setInterval(async () => {
+      // Only auto-refresh when no modal is open
+      if (!this.isModalOpen) {
+        await this.refresh();
+      }
+    }, this.AUTO_REFRESH_MS);
+  }
+
+  private stopAutoRefresh(): void {
+    if (this.autoRefreshInterval) {
+      clearInterval(this.autoRefreshInterval);
+      this.autoRefreshInterval = null;
+    }
+  }
+
   async start(): Promise<void> {
     await this.refresh();
+    this.startAutoRefresh();
     this.worktreeList.focus();
     this.screen.render();
   }
