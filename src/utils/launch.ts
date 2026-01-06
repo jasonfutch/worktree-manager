@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import chalk from 'chalk';
-import { escapeAppleScript, escapeWindowsArg, escapeShellArg } from './shell.js';
+import { escapeAppleScript, escapeWindowsArg } from './shell.js';
 import { PLATFORM, getInstallInstruction, EDITORS, AI_TOOLS } from '../constants.js';
 import { ToolNotFoundError } from '../errors.js';
 

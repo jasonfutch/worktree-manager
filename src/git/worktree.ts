@@ -4,7 +4,6 @@ import path from 'path';
 import fs from 'fs';
 import type { Worktree, CreateWorktreeOptions } from '../types.js';
 import {
-  GitCommandError,
   WorktreeNotFoundError,
   InvalidBranchError,
   InvalidPathError,
