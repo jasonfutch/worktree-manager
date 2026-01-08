@@ -1,7 +1,7 @@
 import blessed from 'blessed';
 import { GitWorktree } from '../git/worktree.js';
 import { truncate } from '../utils/helpers.js';
-import type { Worktree, BranchInfo } from '../types.js';
+import type { Worktree } from '../types.js';
 import { spawn } from 'child_process';
 import { escapeAppleScript, escapeWindowsArg } from '../utils/shell.js';
 import { UI, PLATFORM, GIT, getInstallInstruction } from '../constants.js';
