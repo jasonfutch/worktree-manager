@@ -36,4 +36,20 @@ export interface CreateWorktreeOptions {
   baseBranch?: string;
   /** Custom path for the worktree (default: auto-generated) */
   path?: string;
+  /** Whether to use an existing branch instead of creating a new one */
+  useExisting?: boolean;
+}
+
+/**
+ * Represents branch information
+ */
+export interface BranchInfo {
+  /** Branch name (without remote prefix for remote branches) */
+  name: string;
+  /** Full ref name (e.g., 'origin/main' for remote branches) */
+  fullName: string;
+  /** Whether this is a remote branch */
+  isRemote: boolean;
+  /** Remote name if this is a remote branch */
+  remote?: string;
 }

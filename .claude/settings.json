@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "preCommit": [
+      {
+        "command": "npm run lint",
+        "description": "Run ESLint"
+      },
+      {
+        "command": "npm run build",
+        "description": "Build TypeScript"
+      },
+      {
+        "command": "git diff --cached --name-only | xargs git add",
+        "description": "Re-stage modified files that were already staged"
+      }
+    ]
+  }
+}

@@ -6,6 +6,7 @@ A terminal app for managing git worktrees with AI assistance.
 
 - **TUI Interface** - Full terminal UI built with blessed
 - **Git Worktree Management** - Create, list, and remove worktrees
+- **Branch Flexibility** - Create worktrees from new branches, existing local branches, or remote branches
 - **IDE Integration** - Open worktrees in VS Code, Cursor, Zed, and more
 - **AI Integration** - Launch Claude, Gemini, or Codex in any worktree
 - **Parallel Development** - Work on multiple features simultaneously
@@ -42,7 +43,7 @@ wtm /path/to/repo
 | `↑/k`   | Move up                   |
 | `↓/j`   | Move down                 |
 | `Enter` | Select/Details            |
-| `n`     | Create new worktree       |
+| `n`     | Create worktree (new or existing branch) |
 | `d`     | Delete worktree           |
 | `e`     | Open in editor (selector) |
 | `t`     | Open terminal             |
@@ -51,6 +52,19 @@ wtm /path/to/repo
 | `?`     | Help                      |
 | `q`     | Quit                      |
 
+### Creating Worktrees
+
+Press `n` to create a new worktree. You'll be presented with two options:
+
+1. **Create new branch** - Enter a new branch name and select a base branch to create it from
+2. **Use existing branch** - Select from available local or remote branches
+
+When using existing branches:
+- Local branches are listed first
+- Remote branches are marked with ⬇ and listed after local branches
+- Selecting a remote branch (e.g., `origin/feature`) automatically creates a local tracking branch
+- Branches already checked out in other worktrees are filtered out
+
 ### CLI Commands
 
 ```bash
@@ -58,10 +72,14 @@ wtm /path/to/repo
 wtm list
 wtm list /path/to/repo
 
-# Create a new worktree
+# Create a new worktree (creates new branch from base)
 wtm create feature/my-feature
 wtm create feature/my-feature -b main
 wtm create feature/my-feature -p /custom/path
+
+# Create worktree from existing branch
+wtm create existing-branch        # Uses existing local branch
+wtm create origin/feature -e      # Creates local tracking branch from remote
 
 # Remove a worktree
 wtm remove feature/my-feature
