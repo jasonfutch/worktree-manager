@@ -114,26 +114,34 @@ program
   .argument('[path]', 'Path to git repository', '.')
   .option('-b, --base <branch>', 'Base branch to create from', 'main')
   .option('-p, --path <path>', 'Custom path for the worktree')
-  .action(async (branch: string, repoPath: string, options: { base: string; path?: string }) => {
+  .option('-e, --existing', 'Use existing branch (local or remote)')
+  .action(async (branch: string, repoPath: string, options: { base: string; path?: string; existing?: boolean }) => {
     const resolvedPath = path.resolve(repoPath || '.');
     const repoRoot = GitWorktree.getRepoRoot(resolvedPath);
-    
+
     if (!repoRoot) {
       console.error(chalk.red('Not a git repository'));
       process.exit(1);
     }
 
     const git = new GitWorktree(repoRoot);
-    
-    console.log(chalk.cyan(`Creating worktree for branch: ${branch}...`));
-    
+
+    const isRemote = branch.includes('/') && !branch.startsWith('refs/');
+    const displayBranch = isRemote ? branch : branch;
+    const message = options.existing && isRemote
+      ? `Creating worktree from ${displayBranch} (will create local tracking branch)...`
+      : `Creating worktree for branch: ${displayBranch}...`;
+
+    console.log(chalk.cyan(message));
+
     try {
       const wt = await git.create({
         branch,
         baseBranch: options.base,
-        path: options.path
+        path: options.path,
+        useExisting: options.existing
       });
-      
+
       console.log(chalk.green(`✓ Created worktree: ${wt.path}`));
     } catch (error) {
       console.error(chalk.red(`Error: ${error}`));
@@ -309,11 +317,12 @@ ${chalk.yellow.bold('CLI COMMANDS')}
     $ wtm list
     $ wtm list /path/to/repo
 
-  ${chalk.cyan('wtm create')} ${chalk.white('<branch>')} ${chalk.gray('[path] [-b base] [-p path]')}
+  ${chalk.cyan('wtm create')} ${chalk.white('<branch>')} ${chalk.gray('[path] [-b base] [-p path] [-e]')}
     Create a new worktree
     $ wtm create feature/login
     $ wtm create feature/api -b develop
     $ wtm create bugfix/issue-42 -p /custom/path
+    $ wtm create origin/feature -e  ${chalk.gray('# Use existing remote branch')}
 
   ${chalk.cyan('wtm remove')} ${chalk.white('<branch>')} ${chalk.gray('[path] [-f]')}
     Remove a worktree

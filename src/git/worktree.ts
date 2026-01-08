@@ -2,7 +2,7 @@ import { execSync, exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
-import type { Worktree, CreateWorktreeOptions } from '../types.js';
+import type { Worktree, CreateWorktreeOptions, BranchInfo } from '../types.js';
 import {
   WorktreeNotFoundError,
   InvalidBranchError,
@@ -119,18 +119,22 @@ export class GitWorktree {
    * Create a new worktree
    */
   async create(options: CreateWorktreeOptions): Promise<Worktree> {
-    const { branch, baseBranch = GIT.DEFAULT_BASE_BRANCH, path: customPath } = options;
+    const { branch, baseBranch = GIT.DEFAULT_BASE_BRANCH, path: customPath, useExisting = false } = options;
 
-    // Validate branch name
-    if (!isValidBranchName(branch)) {
-      throw new InvalidBranchError(branch, 'Branch names cannot contain spaces, .., or special characters');
+    // For existing branches, the branch might be a remote ref like 'origin/feature'
+    const isRemoteBranch = branch.includes('/') && !branch.startsWith('refs/');
+    const localBranchName = isRemoteBranch ? branch.split('/').slice(1).join('/') : branch;
+
+    // Validate branch name (use local name for validation)
+    if (!isValidBranchName(localBranchName)) {
+      throw new InvalidBranchError(localBranchName, 'Branch names cannot contain spaces, .., or special characters');
     }
 
     // Generate worktree path if not provided
     const worktreePath = customPath || path.join(
       path.dirname(this.repoPath),
       GIT.WORKTREES_DIR,
-      branch.replace(/\//g, '-')
+      localBranchName.replace(/\//g, '-')
     );
 
     // Validate path doesn't contain traversal attempts
@@ -146,21 +150,40 @@ export class GitWorktree {
     }
 
     try {
-      // Check if branch exists
-      const branchExists = await this.branchExists(branch);
-
       // Use escaped arguments for safety
       const escapedPath = escapeShellArg(worktreePath);
-      const escapedBranch = escapeShellArg(branch);
+      const escapedLocalBranch = escapeShellArg(localBranchName);
       const escapedBase = escapeShellArg(baseBranch);
 
       let command: string;
-      if (branchExists) {
-        // Checkout existing branch
-        command = `git worktree add ${escapedPath} ${escapedBranch}`;
+
+      if (useExisting) {
+        if (isRemoteBranch) {
+          // For remote branches, create a local tracking branch
+          const escapedRemoteBranch = escapeShellArg(branch);
+          // Check if a local branch with this name already exists
+          const localExists = await this.branchExists(localBranchName);
+          if (localExists) {
+            // Use the existing local branch
+            command = `git worktree add ${escapedPath} ${escapedLocalBranch}`;
+          } else {
+            // Create a new local branch tracking the remote
+            command = `git worktree add -b ${escapedLocalBranch} ${escapedPath} ${escapedRemoteBranch}`;
+          }
+        } else {
+          // For local branches, just check them out
+          command = `git worktree add ${escapedPath} ${escapedLocalBranch}`;
+        }
       } else {
-        // Create new branch from base
-        command = `git worktree add -b ${escapedBranch} ${escapedPath} ${escapedBase}`;
+        // Creating a new branch
+        const branchExists = await this.branchExists(branch);
+        if (branchExists) {
+          // Branch already exists, just check it out
+          command = `git worktree add ${escapedPath} ${escapedLocalBranch}`;
+        } else {
+          // Create new branch from base
+          command = `git worktree add -b ${escapedLocalBranch} ${escapedPath} ${escapedBase}`;
+        }
       }
 
       await execAsync(command, { cwd: this.repoPath });
@@ -270,6 +293,74 @@ export class GitWorktree {
       return stdout.trim().split('\n').filter(b => b && !b.startsWith('origin/'));
     } catch {
       // Return empty array on error - caller should handle empty results
+      return [];
+    }
+  }
+
+  /**
+   * Get all branches (local and remote) with structured info
+   * @returns Array of BranchInfo objects, empty array on error
+   */
+  async getAllBranches(): Promise<BranchInfo[]> {
+    try {
+      // Fetch remote refs first to ensure we have the latest
+      await execAsync('git fetch --all --prune', { cwd: this.repoPath }).catch(() => {
+        // Ignore fetch errors (e.g., no network)
+      });
+
+      const { stdout } = await execAsync('git branch -a --format="%(refname:short)"', {
+        cwd: this.repoPath
+      });
+
+      const branches: BranchInfo[] = [];
+      const lines = stdout.trim().split('\n').filter(b => b);
+
+      // Get list of branches already checked out in worktrees
+      const worktrees = await this.list();
+      const checkedOutBranches = new Set(
+        worktrees.map(wt => wt.branch).filter(b => b !== 'HEAD (detached)')
+      );
+
+      for (const line of lines) {
+        // Skip HEAD pointer
+        if (line === 'HEAD' || line.includes('->')) continue;
+
+        if (line.startsWith('origin/')) {
+          // Remote branch
+          const remoteName = 'origin';
+          const branchName = line.substring(7); // Remove 'origin/' prefix
+
+          // Skip if this remote branch is already checked out locally
+          if (checkedOutBranches.has(branchName)) continue;
+
+          branches.push({
+            name: branchName,
+            fullName: line,
+            isRemote: true,
+            remote: remoteName
+          });
+        } else {
+          // Local branch - skip if already checked out in a worktree
+          if (checkedOutBranches.has(line)) continue;
+
+          branches.push({
+            name: line,
+            fullName: line,
+            isRemote: false
+          });
+        }
+      }
+
+      // Sort: local branches first, then remote, alphabetically within each group
+      branches.sort((a, b) => {
+        if (a.isRemote !== b.isRemote) {
+          return a.isRemote ? 1 : -1;
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+      return branches;
+    } catch {
       return [];
     }
   }

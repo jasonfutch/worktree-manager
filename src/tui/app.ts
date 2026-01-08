@@ -1,7 +1,7 @@
 import blessed from 'blessed';
 import { GitWorktree } from '../git/worktree.js';
 import { truncate } from '../utils/helpers.js';
-import type { Worktree } from '../types.js';
+import type { Worktree, BranchInfo } from '../types.js';
 import { spawn } from 'child_process';
 import { escapeAppleScript, escapeWindowsArg } from '../utils/shell.js';
 import { UI, PLATFORM, GIT, getInstallInstruction } from '../constants.js';
@@ -416,9 +416,61 @@ export class WorktreeManagerTUI {
   private async promptCreateWorktree(): Promise<void> {
     if (this.isModalOpen) return;
     this.isModalOpen = true;
+
+    // First, show mode selector
+    const modeList = blessed.list({
+      parent: this.screen,
+      left: 'center',
+      top: 'center',
+      width: 50,
+      height: 8,
+      border: { type: 'line' },
+      style: {
+        border: { fg: 'green' },
+        selected: { bg: 'blue', fg: 'white' },
+        bg: 'default'
+      },
+      label: ' Create Worktree ',
+      keys: true,
+      vi: true,
+      items: [
+        '  Create new branch',
+        '  Use existing branch'
+      ]
+    });
+
+    modeList.focus();
+    this.setStatus(' Select worktree creation mode', 'blue');
+    this.screen.render();
+
+    const cleanupModeSelector = () => {
+      modeList.destroy();
+      this.screen.render();
+    };
+
+    modeList.key(['escape'], () => {
+      cleanupModeSelector();
+      this.isModalOpen = false;
+      this.worktreeList.focus();
+      this.setStatus(' Cancelled', 'blue');
+    });
+
+    modeList.key(['enter'], async () => {
+      const selectedIdx = (modeList as blessed.Widgets.ListElement & { selected: number }).selected;
+      cleanupModeSelector();
+
+      if (selectedIdx === 0) {
+        await this.promptCreateNewBranch();
+      } else {
+        await this.promptUseExistingBranch();
+      }
+    });
+  }
+
+  private async promptCreateNewBranch(): Promise<void> {
     this.setStatus(' Loading branches...', 'blue');
 
-    // Fetch available branches
+    // Fetch available branches for base branch selection
     const branches = await this.git.getBranches();
 
     if (branches.length === 0) {
@@ -437,14 +489,14 @@ export class WorktreeManagerTUI {
         border: { fg: 'green' },
         bg: 'default'
       },
-      label: ' Create New Worktree '
+      label: ' Create New Branch '
     });
 
     blessed.text({
       parent: form,
       top: 1,
       left: 2,
-      content: 'Branch name:',
+      content: 'New branch name:',
       style: { fg: 'default' }
     });
 
@@ -502,7 +554,7 @@ export class WorktreeManagerTUI {
     });
 
     branchInput.focus();
-    this.setStatus(' Creating new worktree...', 'blue');
+    this.setStatus(' Enter new branch name', 'blue');
 
     const submitForm = async () => {
       this.isModalOpen = false;
@@ -516,7 +568,7 @@ export class WorktreeManagerTUI {
       if (branch) {
         this.setStatus(` Creating worktree: ${branch} from ${baseBranch}...`, 'blue');
         try {
-          await this.git.create({ branch, baseBranch });
+          await this.git.create({ branch, baseBranch, useExisting: false });
           await this.refresh();
           this.setStatus(` Created worktree: ${branch}`, 'green');
         } catch (error) {
@@ -554,6 +606,134 @@ export class WorktreeManagerTUI {
     });
 
     this.screen.render();
+  }
+
+  private async promptUseExistingBranch(): Promise<void> {
+    this.setStatus(' Fetching branches...', 'blue');
+    this.screen.render();
+
+    // Fetch all branches including remotes
+    const allBranches = await this.git.getAllBranches();
+
+    if (allBranches.length === 0) {
+      this.isModalOpen = false;
+      this.worktreeList.focus();
+      this.setStatus(' No available branches found (all may already have worktrees)', 'yellow');
+      this.screen.render();
+      return;
+    }
+
+    const form = blessed.box({
+      parent: this.screen,
+      left: 'center',
+      top: 'center',
+      width: 60,
+      height: 20,
+      border: { type: 'line' },
+      style: {
+        border: { fg: 'cyan' },
+        bg: 'default'
+      },
+      label: ' Select Existing Branch '
+    });
+
+    blessed.text({
+      parent: form,
+      top: 1,
+      left: 2,
+      content: 'Available branches:',
+      style: { fg: 'default' }
+    });
+
+    // Format branch items for display
+    const branchItems = allBranches.map(b => {
+      const prefix = b.isRemote ? '{yellow-fg}⬇{/} ' : '  ';
+      const label = b.isRemote ? `${b.fullName}` : b.name;
+      return `${prefix}${label}`;
+    });
+
+    const branchList = blessed.list({
+      parent: form,
+      top: 3,
+      left: 2,
+      width: 54,
+      height: 12,
+      border: { type: 'line' },
+      style: {
+        border: { fg: 'cyan' },
+        selected: { bg: 'blue', fg: 'white' },
+        focus: { border: { fg: 'green' } }
+      },
+      keys: true,
+      vi: true,
+      mouse: true,
+      tags: true,
+      items: branchItems,
+      scrollbar: {
+        ch: '│',
+        style: { fg: 'cyan' }
+      }
+    });
+
+    blessed.text({
+      parent: form,
+      top: 16,
+      left: 2,
+      content: '↑↓/jk Navigate | Enter Select | Esc Cancel | {yellow-fg}⬇{/} = remote',
+      tags: true,
+      style: { fg: 'gray' }
+    });
+
+    branchList.focus();
+    this.setStatus(' Select a branch to create worktree from', 'blue');
+    this.screen.render();
+
+    const cancelForm = () => {
+      this.isModalOpen = false;
+      form.destroy();
+      this.worktreeList.focus();
+      this.setStatus(' Cancelled', 'blue');
+      this.screen.render();
+    };
+
+    branchList.key(['escape'], cancelForm);
+
+    branchList.key(['enter'], async () => {
+      const selectedIdx = (branchList as blessed.Widgets.ListElement & { selected: number }).selected;
+      const selectedBranch = allBranches[selectedIdx];
+
+      this.isModalOpen = false;
+      form.destroy();
+      this.worktreeList.focus();
+
+      if (selectedBranch) {
+        const displayName = selectedBranch.isRemote ? selectedBranch.fullName : selectedBranch.name;
+        const creatingMsg = selectedBranch.isRemote
+          ? ` Creating worktree from ${displayName} (will create local tracking branch)...`
+          : ` Creating worktree for ${displayName}...`;
+
+        this.setStatus(creatingMsg, 'blue');
+        this.screen.render();
+
+        try {
+          await this.git.create({
+            branch: selectedBranch.fullName,
+            useExisting: true
+          });
+          await this.refresh();
+          const successMsg = selectedBranch.isRemote
+            ? ` Created worktree: ${selectedBranch.name} (tracking ${selectedBranch.fullName})`
+            : ` Created worktree: ${selectedBranch.name}`;
+          this.setStatus(successMsg, 'green');
+        } catch (error) {
+          const message = error instanceof GitCommandError
+            ? error.getUserMessage()
+            : (error instanceof Error ? error.message : String(error));
+          this.setStatus(` Error: ${message}`, 'red');
+        }
+      }
+      this.screen.render();
+    });
   }
 
   private async promptDeleteWorktree(): Promise<void> {
