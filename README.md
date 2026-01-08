@@ -9,6 +9,7 @@ A terminal app for managing git worktrees with AI assistance.
 - **IDE Integration** - Open worktrees in VS Code, Cursor, Zed, and more
 - **AI Integration** - Launch Claude, Gemini, or Codex in any worktree
 - **Parallel Development** - Work on multiple features simultaneously
+- **Auto-Update Notifications** - Get notified when a new version is available
 
 ## Requirements
 
@@ -80,6 +81,9 @@ wtm ai feature/my-feature
 wtm ai main -t gemini
 # Tools: claude, gemini, codex
 
+# Update to latest version
+wtm update
+
 # Show detailed help
 wtm help
 ```
@@ -90,6 +94,25 @@ wtm help
 2. **Parallel Development** - Each worktree is independent, allowing you to run different AI coding sessions
 3. **IDE Integration** - Opens editors in the worktree directory so your AI assistant has the right context
 4. **Terminal Sessions** - Opens new terminal windows/tabs in the worktree directory
+
+## Updating
+
+The CLI automatically checks for updates once per day and notifies you when a new version is available:
+
+```
+╭─────────────────────────────────────────────────╮
+│                                                 │
+│   Update available 1.0.0 → 1.1.0                │
+│   Run npm i -g @jasonfutch/worktree-manager     │
+│                                                 │
+╰─────────────────────────────────────────────────╯
+```
+
+You can also manually update at any time:
+
+```bash
+wtm update
+```
 
 ## Screenshots
 
@@ -142,6 +165,7 @@ worktree-manager/
 │   ├── types.ts          # TypeScript types
 │   ├── errors.ts         # Custom error classes
 │   ├── constants.ts      # Application constants
+│   ├── version.ts        # Version from package.json
 │   ├── git/
 │   │   └── worktree.ts   # Git worktree operations
 │   ├── tui/
