@@ -6,6 +6,7 @@ import { spawn } from 'child_process';
 import { escapeAppleScript, escapeWindowsArg } from '../utils/shell.js';
 import { UI, PLATFORM, GIT, getInstallInstruction } from '../constants.js';
 import { GitCommandError } from '../errors.js';
+import { VERSION } from '../version.js';
 
 export class WorktreeManagerTUI {
   private screen: blessed.Widgets.Screen;
@@ -127,7 +128,7 @@ export class WorktreeManagerTUI {
         bg: 'blue',
         fg: 'white'
       },
-      content: ' Ready | Press ? for help | q to quit',
+      content: ` v${VERSION} | Press ? for help | q to quit`,
       tags: true
     });
 
@@ -209,7 +210,7 @@ export class WorktreeManagerTUI {
       this.worktrees = await this.git.list();
       this.updateList();
       this.updateDetails();
-      this.setStatus(` Loaded ${this.worktrees.length} worktrees`);
+      this.setStatus(` v${VERSION} | ${this.worktrees.length} worktree${this.worktrees.length === 1 ? '' : 's'} | ? for help`);
     } catch (error) {
       const message = error instanceof GitCommandError
         ? error.getUserMessage()
@@ -353,7 +354,7 @@ export class WorktreeManagerTUI {
     if (this.isModalOpen) return;
     this.isModalOpen = true;
 
-    const helpContent = `{bold}{cyan-fg}Worktree Manager Help{/}
+    const helpContent = `{bold}{cyan-fg}Worktree Manager v${VERSION}{/}
 
 {bold}Navigation{/}
   {cyan-fg}↑/k{/}      Move selection up

@@ -10,9 +10,16 @@ import path from 'path';
 import fs from 'fs';
 import readline from 'readline';
 import { GIT } from './constants.js';
+import { VERSION, PACKAGE_NAME, pkg } from './version.js';
+import updateNotifier from 'update-notifier';
+import { execSync } from 'child_process';
 
 // Check dependencies before anything else
 runStartupChecks();
+
+// Check for updates (runs in background, notifies if update available)
+const notifier = updateNotifier({ pkg, updateCheckInterval: 1000 * 60 * 60 * 24 }); // Check daily
+notifier.notify({ isGlobal: true });
 
 // Helper to prompt user for input
 function promptUser(question: string): Promise<string> {
@@ -42,7 +49,7 @@ const program = new Command();
 program
   .name('worktree-manager')
   .description('Terminal app for managing git worktrees with AI assistance')
-  .version('1.0.0')
+  .version(VERSION)
   .argument('[path]', 'Path to git repository', '.')
   .action(async (repoPath: string) => {
     const resolvedPath = path.resolve(repoPath);
@@ -330,6 +337,10 @@ ${chalk.yellow.bold('CLI COMMANDS')}
     $ wtm ai main -t gemini
     ${chalk.gray('Tools: claude, gemini, codex')}
 
+  ${chalk.cyan('wtm update')}
+    Update to the latest version
+    $ wtm update
+
 ${chalk.yellow.bold('TUI KEYBINDINGS')}
   ${chalk.cyan('↑/k, ↓/j')}    Navigate worktrees
   ${chalk.cyan('Enter')}       Show details
@@ -342,6 +353,41 @@ ${chalk.yellow.bold('TUI KEYBINDINGS')}
   ${chalk.cyan('?')}           Show help
   ${chalk.cyan('q')}           Quit
 `);
+  });
+
+// Subcommand: update to latest version
+program
+  .command('update')
+  .description('Update to the latest version')
+  .action(() => {
+    console.log(chalk.cyan(`\nCurrent version: ${VERSION}`));
+    console.log(chalk.gray('Checking for updates...\n'));
+
+    try {
+      // Check npm for latest version
+      const latestVersion = execSync(`npm view ${PACKAGE_NAME} version`, { encoding: 'utf-8' }).trim();
+
+      if (latestVersion === VERSION) {
+        console.log(chalk.green(`✓ Already on the latest version (${VERSION})`));
+        return;
+      }
+
+      console.log(chalk.yellow(`New version available: ${latestVersion}`));
+      console.log(chalk.gray(`Updating ${PACKAGE_NAME}...\n`));
+
+      // Run the update
+      execSync(`npm install -g ${PACKAGE_NAME}@latest`, { stdio: 'inherit' });
+
+      console.log(chalk.green(`\n✓ Successfully updated to ${latestVersion}`));
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('npm view')) {
+        console.error(chalk.red('Error: Could not check for updates. Package may not be published yet.'));
+      } else {
+        console.error(chalk.red(`Error updating: ${error instanceof Error ? error.message : error}`));
+        console.log(chalk.gray(`\nTry manually: npm install -g ${PACKAGE_NAME}@latest`));
+      }
+      process.exit(1);
+    }
   });
 
 program.parse();
