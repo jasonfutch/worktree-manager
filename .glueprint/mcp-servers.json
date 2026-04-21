@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "glueprint": {
+      "command": "/Users/jasonfutch/Documents/GitHub/glueprint/src-tauri/target/debug/glueprint-mcp",
+      "args": [
+        "--port",
+        "62232",
+        "--project-path",
+        "/Users/jasonfutch/Documents/GitHub/worktree-manager-test-session",
+        "--session-id",
+        "f5301f39-29fd-475d-9080-0726f5ff282b"
+      ]
+    }
+  }
+}
